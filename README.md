@@ -112,11 +112,13 @@ This project intentionally tracks *how* AI was used, not just *what* was built:
 
 ## Architecture Decision Records
 
-| # | Title | Status |
-|---|-------|--------|
-| [001](docs/decisions/001-multi-account-architecture.md) | Multi-Account Architecture with Landing Zone | Accepted |
-| [002](docs/decisions/002-monitoring-account-separation.md) | Monitoring stack in dedicated Operations Account | Accepted |
-| [003](docs/decisions/003-iam-centralized-management.md) | Centralized IAM via Organizations + Identity Center | Accepted |
+주요 의사결정은 ADR로 기록합니다. → [전체 목록 (INDEX)](docs/decisions/INDEX.md)
+
+| # | Title | Summary |
+|---|-------|---------|
+| [001](docs/decisions/001-multi-account-architecture.md) | Multi-Account Architecture | 3계정 구조 + TGW 연결 |
+| [002](docs/decisions/002-monitoring-account-separation.md) | Monitoring Account Separation | 모니터링 장애 격리를 위한 계정 분리 |
+| [003](docs/decisions/003-iam-centralized-management.md) | Centralized IAM | Organizations + Identity Center SSO |
 
 ## License
 
