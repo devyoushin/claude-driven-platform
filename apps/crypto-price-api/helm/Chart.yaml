@@ -1,0 +1,5 @@
+apiVersion: v2
+name: crypto-price-api
+description: Crypto price fetching and serving API (Go)
+version: 0.1.0
+appVersion: "1.0.0"

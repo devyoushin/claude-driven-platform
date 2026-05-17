@@ -1,0 +1,49 @@
+replicaCount: 2
+
+image:
+  repository: ACCOUNT_ID.dkr.ecr.ap-northeast-2.amazonaws.com/crypto-alert-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8000
+
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internal
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+  hosts:
+    - host: alert-api.internal.cdp.io
+      paths:
+        - path: /
+          pathType: Prefix
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+env:
+  PRICE_API_URL: "http://crypto-price-api:8080"
+  EVAL_INTERVAL_SECONDS: "30"
+  AWS_REGION: "ap-northeast-2"
+  # DATABASE_URL, SNS_TOPIC_ARN은 Secret에서 주입
+
+serviceMonitor:
+  enabled: true
+  interval: 15s
+  path: /metrics
+  port: http

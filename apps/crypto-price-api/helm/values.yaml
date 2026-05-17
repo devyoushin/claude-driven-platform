@@ -1,0 +1,51 @@
+replicaCount: 2
+
+image:
+  repository: ACCOUNT_ID.dkr.ecr.ap-northeast-2.amazonaws.com/crypto-price-api
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+  metricsPort: 9090
+
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internal
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+  hosts:
+    - host: price-api.internal.cdp.io
+      paths:
+        - path: /
+          pathType: Prefix
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+env:
+  PORT: "8080"
+  METRICS_PORT: "9090"
+  FETCH_INTERVAL: "10s"
+  # DATABASE_URL은 Secret에서 주입
+
+serviceMonitor:
+  enabled: true
+  interval: 15s
+  path: /metrics
+  port: metrics

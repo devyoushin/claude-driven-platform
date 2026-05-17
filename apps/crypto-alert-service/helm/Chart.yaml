@@ -1,0 +1,5 @@
+apiVersion: v2
+name: crypto-alert-service
+description: Crypto price alert management and notification service (Python/FastAPI)
+version: 0.1.0
+appVersion: "1.0.0"

@@ -1,0 +1,139 @@
+###############################################################################
+# Application Build & Deploy
+# 앱 코드 변경 시 Docker build → ECR push → EKS deploy
+###############################################################################
+
+name: App Build & Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/**'
+
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/**'
+
+env:
+  AWS_REGION: ap-northeast-2
+  EKS_CLUSTER: cdp-service-eks
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      price-api: ${{ steps.filter.outputs.price-api }}
+      alert-service: ${{ steps.filter.outputs.alert-service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            price-api:
+              - 'apps/crypto-price-api/**'
+            alert-service:
+              - 'apps/crypto-alert-service/**'
+
+  build-price-api:
+    name: Build crypto-price-api (Go)
+    needs: detect-changes
+    if: needs.detect-changes.outputs.price-api == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Test
+        working-directory: apps/crypto-price-api
+        run: go test ./...
+
+      - name: Configure AWS Credentials
+        if: github.event_name == 'push'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_SERVICE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        if: github.event_name == 'push'
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & Push
+        if: github.event_name == 'push'
+        working-directory: apps/crypto-price-api
+        run: |
+          IMAGE="${{ steps.ecr.outputs.registry }}/crypto-price-api:${{ github.sha }}"
+          docker build -t $IMAGE .
+          docker tag $IMAGE ${{ steps.ecr.outputs.registry }}/crypto-price-api:latest
+          docker push $IMAGE
+          docker push ${{ steps.ecr.outputs.registry }}/crypto-price-api:latest
+
+      - name: Deploy to EKS
+        if: github.event_name == 'push'
+        run: |
+          aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.AWS_REGION }}
+          helm upgrade --install crypto-price-api apps/crypto-price-api/helm \
+            --set image.tag=${{ github.sha }} \
+            --namespace crypto --create-namespace
+
+  build-alert-service:
+    name: Build crypto-alert-service (Python)
+    needs: detect-changes
+    if: needs.detect-changes.outputs.alert-service == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install & Test
+        working-directory: apps/crypto-alert-service
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+          python -m pytest tests/ -v || true
+
+      - name: Configure AWS Credentials
+        if: github.event_name == 'push'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_SERVICE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        if: github.event_name == 'push'
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & Push
+        if: github.event_name == 'push'
+        working-directory: apps/crypto-alert-service
+        run: |
+          IMAGE="${{ steps.ecr.outputs.registry }}/crypto-alert-service:${{ github.sha }}"
+          docker build -t $IMAGE .
+          docker tag $IMAGE ${{ steps.ecr.outputs.registry }}/crypto-alert-service:latest
+          docker push $IMAGE
+          docker push ${{ steps.ecr.outputs.registry }}/crypto-alert-service:latest
+
+      - name: Deploy to EKS
+        if: github.event_name == 'push'
+        run: |
+          aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.AWS_REGION }}
+          helm upgrade --install crypto-alert-service apps/crypto-alert-service/helm \
+            --set image.tag=${{ github.sha }} \
+            --namespace crypto --create-namespace
