@@ -316,8 +316,70 @@ terraform apply
 
 ---
 
+## Step 5: CI/CD 파이프라인 — GitHub Actions (2026-05-17)
+
+### 목적
+Terraform 변경을 자동화된 파이프라인으로 관리한다. PR 시 Plan/보안 검사, merge 시 자동 Apply.
+
+### 생성한 파일
+
+| 파일 | Trigger | 역할 |
+|------|---------|------|
+| `.github/workflows/terraform-plan.yml` | PR to main | 변경된 환경만 plan → PR 코멘트 |
+| `.github/workflows/terraform-apply.yml` | Push to main / Manual | 순차 apply (LZ→Service→Ops) |
+| `.github/workflows/terraform-security.yml` | PR to main | tfsec, Checkov, fmt, 비용 추정 |
+| `.github/workflows/drift-detection.yml` | Daily 09:00 KST | Drift 감지 → Issue 자동 생성 |
+| `infra/terraform/landing-zone/github-oidc.tf` | - | GitHub OIDC Provider + IAM Role |
+
+### 파이프라인 흐름
+```
+Feature Branch → PR 생성
+  → terraform plan (변경 환경만)
+  → tfsec + Checkov 보안 스캔
+  → Infracost 비용 추정
+  → PR 코멘트로 결과 확인
+  → 리뷰 & Approve
+  → Merge to main
+  → terraform apply (Landing Zone → Service → Operations 순)
+  → GitHub Environment 승인 필요
+```
+
+### 인증 방식: OIDC (Access Key 없음)
+```
+GitHub Actions → OIDC Token → AWS IAM OIDC Provider → AssumeRole
+```
+- Long-lived Access Key 불필요 (보안 강화)
+- 각 계정별 별도 Role로 최소 권한
+- GitHub repo에 대한 trust 조건 설정
+
+### 나중에 설정할 것 (AWS 연결 후)
+```bash
+# 1. GitHub Secrets 설정
+gh secret set AWS_ROLE_LANDING_ZONE --body "arn:aws:iam::111111111111:role/cdp-github-actions-landing-zone"
+gh secret set AWS_ROLE_SERVICE --body "arn:aws:iam::222222222222:role/cdp-github-actions-service"
+gh secret set AWS_ROLE_OPERATIONS --body "arn:aws:iam::333333333333:role/cdp-github-actions-operations"
+
+# 2. GitHub Environments 설정 (수동 - Settings > Environments)
+# landing-zone: Required reviewers 추가
+# service: Required reviewers 추가
+# operations: Required reviewers 추가
+
+# 3. (선택) Infracost API Key
+gh secret set INFRACOST_API_KEY --body "ico-xxxxx"
+```
+
+### 배운 점
+- GitHub OIDC는 Access Key를 완전히 제거할 수 있는 AWS 공식 권장 방식
+- `dorny/paths-filter`로 변경된 디렉토리만 감지하면 불필요한 plan 실행 방지
+- `terraform plan -detailed-exitcode`는 exit code 2 = 변경 있음 (drift 감지에 활용)
+- GitHub Environment의 "Required reviewers"로 apply 전 수동 승인 게이트 구현
+- tfsec + Checkov 조합으로 IaC 보안 검사 커버리지 극대화
+- Infracost로 PR 단계에서 비용 영향 미리 확인 가��
+
+---
+
 ## 다음 단계 (예정)
-- [ ] CI/CD 파이프라인 (GitHub Actions → terraform plan/apply)
 - [ ] 실제 AWS 연결 및 terraform apply 테스트
 - [ ] 보안 강화 (Security Hub, GuardDuty, Config Rules)
 - [ ] 샘플 애플리케이션 배포 (EKS)
+- [ ] Grafana 대시보드 JSON 작성

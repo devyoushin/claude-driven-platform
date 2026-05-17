@@ -1,0 +1,101 @@
+###############################################################################
+# Terraform Security Scan
+# PR 시 보안 취약점/모범사례 위반 검사
+###############################################################################
+
+name: Terraform Security
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'infra/terraform/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  tfsec:
+    name: tfsec Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: infra/terraform
+          format: sarif
+          soft_fail: true
+
+      - name: Run tfsec (PR comment)
+        uses: aquasecurity/tfsec-pr-commenter-action@v1.3.1
+        with:
+          working_directory: infra/terraform
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+  checkov:
+    name: Checkov Policy Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: infra/terraform
+          framework: terraform
+          output_format: cli,sarif
+          output_file_path: console,checkov.sarif
+          soft_fail: true
+          skip_check: CKV_AWS_144,CKV_AWS_145  # S3 cross-region replication (불필요)
+
+  terraform-fmt:
+    name: Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.5.7'
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive infra/terraform
+
+  cost-estimate:
+    name: Cost Estimation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Infracost
+        uses: infracost/actions/setup@v3
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Generate Cost Estimate
+        run: |
+          infracost breakdown \
+            --path=infra/terraform/landing-zone \
+            --format=json \
+            --out-file=/tmp/landing-zone.json || true
+
+          infracost breakdown \
+            --path=infra/terraform/service \
+            --format=json \
+            --out-file=/tmp/service.json || true
+
+          infracost breakdown \
+            --path=infra/terraform/operations \
+            --format=json \
+            --out-file=/tmp/operations.json || true
+
+      - name: Post Cost Comment
+        uses: infracost/actions/comment@v3
+        with:
+          path: "/tmp/*.json"
+          behavior: update
+        continue-on-error: true  # Infracost API key 없으면 skip

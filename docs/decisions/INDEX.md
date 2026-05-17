@@ -38,7 +38,7 @@
 
 | # | Title | Status | Summary |
 |---|-------|--------|---------|
-| — | (예정) | — | GitHub Actions 기반 Terraform 자동화 |
+| [004](004-cicd-github-actions.md) | GitHub Actions + OIDC CI/CD | ✅ Accepted | PR시 plan/security scan, merge시 순차 apply, daily drift detection |
 
 ### Application
 
@@ -55,6 +55,7 @@
 | [001](001-multi-account-architecture.md) | 2026-05-17 | Multi-Account Architecture | ✅ Accepted | Infra/Network |
 | [002](002-monitoring-account-separation.md) | 2026-05-17 | Monitoring Account Separation | ✅ Accepted | Monitoring |
 | [003](003-iam-centralized-management.md) | 2026-05-17 | Centralized IAM Management | ✅ Accepted | Security/IAM |
+| [004](004-cicd-github-actions.md) | 2026-05-17 | GitHub Actions + OIDC CI/CD | ✅ Accepted | CI/CD |
 
 ---
 

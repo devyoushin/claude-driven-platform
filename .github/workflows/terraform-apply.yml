@@ -1,0 +1,172 @@
+###############################################################################
+# Terraform Apply - main 브랜치 merge 시 자동 실행
+# Landing Zone → Service → Operations 순서로 배포 (의존성 순서)
+###############################################################################
+
+name: Terraform Apply
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infra/terraform/**'
+
+  # 수동 실행 지원 (특정 환경만 선택 배포 가능)
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target environment to apply'
+        required: true
+        type: choice
+        options:
+          - all
+          - landing-zone
+          - service
+          - operations
+
+env:
+  AWS_REGION: ap-northeast-2
+  TF_VERSION: '1.5.7'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  detect-changes:
+    name: Detect Changed Modules
+    runs-on: ubuntu-latest
+    outputs:
+      landing-zone: ${{ steps.filter.outputs.landing-zone }}
+      service: ${{ steps.filter.outputs.service }}
+      operations: ${{ steps.filter.outputs.operations }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            landing-zone:
+              - 'infra/terraform/landing-zone/**'
+              - 'infra/terraform/modules/**'
+            service:
+              - 'infra/terraform/service/**'
+              - 'infra/terraform/modules/**'
+            operations:
+              - 'infra/terraform/operations/**'
+              - 'infra/terraform/modules/**'
+
+  apply-landing-zone:
+    name: Apply (Landing Zone)
+    needs: detect-changes
+    if: |
+      needs.detect-changes.outputs.landing-zone == 'true' ||
+      github.event.inputs.target == 'all' ||
+      github.event.inputs.target == 'landing-zone'
+    runs-on: ubuntu-latest
+    environment: landing-zone  # GitHub Environment (승인 필요)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_LANDING_ZONE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: infra/terraform/landing-zone
+        run: terraform init -input=false
+
+      - name: Terraform Apply
+        working-directory: infra/terraform/landing-zone
+        run: terraform apply -input=false -auto-approve
+
+  apply-service:
+    name: Apply (Service)
+    needs: [detect-changes, apply-landing-zone]
+    if: |
+      always() &&
+      (needs.apply-landing-zone.result == 'success' || needs.apply-landing-zone.result == 'skipped') &&
+      (needs.detect-changes.outputs.service == 'true' ||
+       github.event.inputs.target == 'all' ||
+       github.event.inputs.target == 'service')
+    runs-on: ubuntu-latest
+    environment: service
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_SERVICE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: infra/terraform/service
+        run: terraform init -input=false
+
+      - name: Terraform Apply
+        working-directory: infra/terraform/service
+        run: terraform apply -input=false -auto-approve
+
+  apply-operations:
+    name: Apply (Operations)
+    needs: [detect-changes, apply-service]
+    if: |
+      always() &&
+      (needs.apply-service.result == 'success' || needs.apply-service.result == 'skipped') &&
+      (needs.detect-changes.outputs.operations == 'true' ||
+       github.event.inputs.target == 'all' ||
+       github.event.inputs.target == 'operations')
+    runs-on: ubuntu-latest
+    environment: operations
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_OPERATIONS }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: infra/terraform/operations
+        run: terraform init -input=false
+
+      - name: Terraform Apply
+        working-directory: infra/terraform/operations
+        run: terraform apply -input=false -auto-approve
+
+  notify:
+    name: Notify Result
+    needs: [apply-landing-zone, apply-service, apply-operations]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summary
+        run: |
+          echo "## Terraform Apply Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Account | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Landing Zone | ${{ needs.apply-landing-zone.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | ${{ needs.apply-service.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Operations | ${{ needs.apply-operations.result }} |" >> $GITHUB_STEP_SUMMARY

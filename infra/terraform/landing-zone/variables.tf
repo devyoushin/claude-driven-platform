@@ -29,3 +29,9 @@ variable "operations_account_email" {
   description = "Email for Operations Account (must be unique across AWS)"
   type        = string
 }
+
+variable "github_repo" {
+  description = "GitHub repository (owner/repo) for OIDC trust"
+  type        = string
+  default     = "devyoushin/claude-driven-platform"
+}

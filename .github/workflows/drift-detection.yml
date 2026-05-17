@@ -1,0 +1,172 @@
+###############################################################################
+# Terraform Drift Detection
+# 매일 정해진 시간에 실행 → 수동 변경(drift) 감지
+###############################################################################
+
+name: Terraform Drift Detection
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # 매일 UTC 00:00 (KST 09:00)
+
+  workflow_dispatch:  # 수동 실행 지원
+
+env:
+  AWS_REGION: ap-northeast-2
+  TF_VERSION: '1.5.7'
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+jobs:
+  drift-landing-zone:
+    name: Drift Check (Landing Zone)
+    runs-on: ubuntu-latest
+    outputs:
+      has_drift: ${{ steps.plan.outputs.has_drift }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_LANDING_ZONE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: infra/terraform/landing-zone
+        run: terraform init -input=false
+
+      - name: Terraform Plan (Drift Check)
+        id: plan
+        working-directory: infra/terraform/landing-zone
+        run: |
+          terraform plan -input=false -detailed-exitcode -no-color 2>&1 | tee plan.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+          if [ $EXIT_CODE -eq 2 ]; then
+            echo "has_drift=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_drift=false" >> $GITHUB_OUTPUT
+          fi
+        continue-on-error: true
+
+  drift-service:
+    name: Drift Check (Service)
+    runs-on: ubuntu-latest
+    outputs:
+      has_drift: ${{ steps.plan.outputs.has_drift }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_SERVICE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: infra/terraform/service
+        run: terraform init -input=false
+
+      - name: Terraform Plan (Drift Check)
+        id: plan
+        working-directory: infra/terraform/service
+        run: |
+          terraform plan -input=false -detailed-exitcode -no-color 2>&1 | tee plan.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+          if [ $EXIT_CODE -eq 2 ]; then
+            echo "has_drift=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_drift=false" >> $GITHUB_OUTPUT
+          fi
+        continue-on-error: true
+
+  drift-operations:
+    name: Drift Check (Operations)
+    runs-on: ubuntu-latest
+    outputs:
+      has_drift: ${{ steps.plan.outputs.has_drift }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_OPERATIONS }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: infra/terraform/operations
+        run: terraform init -input=false
+
+      - name: Terraform Plan (Drift Check)
+        id: plan
+        working-directory: infra/terraform/operations
+        run: |
+          terraform plan -input=false -detailed-exitcode -no-color 2>&1 | tee plan.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+          if [ $EXIT_CODE -eq 2 ]; then
+            echo "has_drift=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_drift=false" >> $GITHUB_OUTPUT
+          fi
+        continue-on-error: true
+
+  create-issue:
+    name: Create Drift Issue
+    needs: [drift-landing-zone, drift-service, drift-operations]
+    if: |
+      needs.drift-landing-zone.outputs.has_drift == 'true' ||
+      needs.drift-service.outputs.has_drift == 'true' ||
+      needs.drift-operations.outputs.has_drift == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const drifts = [];
+            if ('${{ needs.drift-landing-zone.outputs.has_drift }}' === 'true') drifts.push('Landing Zone');
+            if ('${{ needs.drift-service.outputs.has_drift }}' === 'true') drifts.push('Service');
+            if ('${{ needs.drift-operations.outputs.has_drift }}' === 'true') drifts.push('Operations');
+
+            const body = `## ⚠️ Infrastructure Drift Detected
+
+            The following accounts have configuration drift (manual changes detected):
+
+            ${drifts.map(d => `- **${d}**`).join('\n')}
+
+            ### Action Required
+            1. Review the drift in the [workflow run](${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID})
+            2. Either:
+               - Run \`terraform apply\` to overwrite manual changes
+               - Update Terraform code to match the desired state
+
+            ### Labels
+            This issue was auto-generated by the drift detection workflow.
+            `;
+
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🔄 Infrastructure Drift Detected: ${drifts.join(', ')}`,
+              body: body,
+              labels: ['infrastructure', 'drift', 'automated']
+            });
