@@ -241,8 +241,83 @@ kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80 -n monitoring
 
 ---
 
+## Step 4: Organizations + Identity Center + CloudTrail (2026-05-17)
+
+### 목적
+Landing Zone에서 AWS Organizations + IAM Identity Center(SSO)로 전체 계정의 IAM을 중앙 관리한다.
+(ADR-003에서 결정한 "중앙 집중식 IAM 관리" 구현)
+
+### 생성한 파일 (`infra/terraform/landing-zone/`)
+
+| 파일 | 역할 |
+|------|------|
+| `organizations.tf` | AWS Organizations + OU(Security/Workload/Operations) + Member Accounts |
+| `scp.tf` | Service Control Policies (리전 제한, Root 금지, IAM User 금지, CloudTrail 보호, Tag Policy) |
+| `identity-center.tf` | IAM Identity Center — Groups, Permission Sets, Account Assignments |
+| `cloudtrail.tf` | 조직 전체 감사 로그 (S3 + CloudWatch Logs, 90일 Glacier 아카이빙) |
+
+### OU 구조
+```
+Root
+├── Security OU
+│   └── Landing Zone Account (관리 계정)
+├── Workload OU
+│   └── Service Account (cdp-service)
+└── Operations OU
+    └── Operations Account (cdp-operations)
+```
+
+### Permission Sets 매핑
+| Group | Permission Set | Target Account | 용도 |
+|-------|---------------|----------------|------|
+| platform-admins | AdministratorAccess | Landing Zone | 전체 관리 |
+| developers | ServiceDeployAccess | Service | EKS/EC2 배포 (삭제 불가) |
+| sre-team | OperationsFullAccess | Operations | 모니터링 관리 |
+| sre-team | ServiceReadOnly | Service | 서비스 읽기 (디버깅) |
+| viewers | ViewOnlyAccess | All | 감사/조회 전용 |
+
+### SCP 적용 내역
+| SCP | 적용 대상 | 효과 |
+|-----|----------|------|
+| Region Restriction | Workload, Operations OU | ap-northeast-2만 허용 |
+| Deny Root | Workload, Operations OU | Root 사용자 모든 작업 거부 |
+| Deny IAM User Creation | Workload, Operations OU | IAM User 생성 불가 (SSO 강제) |
+| Protect CloudTrail | Workload, Operations OU | CloudTrail 삭제/중지 방지 |
+| Tag Policy | Root (전체) | 필수 태그 강제 |
+
+### CloudTrail 설정
+- 조직 전체 Trail (모든 계정의 API 호출 기록)
+- S3에 저장 + 90일 후 Glacier로 아카이빙 + 365일 후 삭제
+- CloudWatch Logs로도 전달 (실시간 모니터링 가능)
+
+### 나중에 실행할 명령어 (AWS 권한 설정 후)
+```bash
+# Landing Zone 배포 시 (Step 2에서 이미 정의한 순서에 추가)
+cd infra/terraform/landing-zone
+
+# organizations, identity-center, scp, cloudtrail이 함께 배포됨
+terraform init
+terraform plan -var="service_account_email=cdp-service@yourdomain.com" \
+              -var="operations_account_email=cdp-ops@yourdomain.com"
+terraform apply
+
+# 배포 후 SSO Portal 접속
+# https://cdp.awsapps.com/start 에서 로그인
+```
+
+### 배운 점
+- Organizations에서 `feature_set = "ALL"`이어야 SCP 사용 가능
+- SCP는 "허용"이 아닌 "거부"로 가드레일을 만드는 개념
+- `NotAction`을 사용해야 Global 서비스(IAM, CloudFront 등)가 차단되지 않음
+- Identity Center Permission Set에 `DenyDestructive` 문을 넣으면 실수 방지
+- CloudTrail은 `is_organization_trail = true`로 모든 멤버 계정에 자동 적용
+- Tag Policy의 `enforced_for`로 특정 리소스 유형에만 태그 강제 가능
+- S3 Lifecycle로 Glacier 전환하면 로그 장기보관 비용 절감
+
+---
+
 ## 다음 단계 (예정)
-- [ ] Landing Zone에 Organizations + Identity Center Terraform 추가
 - [ ] CI/CD 파이프라인 (GitHub Actions → terraform plan/apply)
 - [ ] 실제 AWS 연결 및 terraform apply 테스트
 - [ ] 보안 강화 (Security Hub, GuardDuty, Config Rules)
+- [ ] 샘플 애플리케이션 배포 (EKS)

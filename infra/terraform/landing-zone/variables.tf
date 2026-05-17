@@ -15,3 +15,17 @@ variable "vpc_cidr" {
   type        = string
   default     = "10.0.0.0/16"
 }
+
+###############################################################################
+# Organizations & Identity Center
+###############################################################################
+
+variable "service_account_email" {
+  description = "Email for Service Account (must be unique across AWS)"
+  type        = string
+}
+
+variable "operations_account_email" {
+  description = "Email for Operations Account (must be unique across AWS)"
+  type        = string
+}

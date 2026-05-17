@@ -22,3 +22,27 @@ output "waf_web_acl_arn" {
   description = "WAF Web ACL ARN"
   value       = aws_wafv2_web_acl.main.arn
 }
+
+###############################################################################
+# Organizations
+###############################################################################
+
+output "organization_id" {
+  description = "AWS Organization ID"
+  value       = aws_organizations_organization.main.id
+}
+
+output "service_account_id" {
+  description = "Service Account AWS Account ID"
+  value       = aws_organizations_account.service.id
+}
+
+output "operations_account_id" {
+  description = "Operations Account AWS Account ID"
+  value       = aws_organizations_account.operations.id
+}
+
+output "sso_portal_url" {
+  description = "IAM Identity Center SSO Portal URL"
+  value       = "https://cdp.awsapps.com/start"
+}
