@@ -1,0 +1,24 @@
+# Operations Account Variables
+# 이 파일을 terraform.tfvars로 복사한 뒤 값을 채워 사용
+
+region      = "ap-northeast-2"
+environment = "prod"
+vpc_cidr    = "10.20.0.0/16"
+
+# Landing Zone에서 생성된 TGW ID
+transit_gateway_id = "tgw-xxxxxxxxxxxxxxxxx"
+
+# Service Account ID (Cross-account access용)
+service_account_id = "123456789012"
+
+# EKS
+eks_cluster_version     = "1.29"
+eks_node_instance_types = ["t3.large"]
+eks_node_desired_size   = 2
+
+# Grafana
+grafana_admin_password = "CHANGE_ME"
+
+# Alerting (optional)
+slack_webhook_url = ""
+alert_email       = "your-email@example.com"

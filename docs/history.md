@@ -151,8 +151,98 @@ terraform apply
 
 ---
 
+## Step 3: Operations Account — 모니터링 스택 (2026-05-17)
+
+### 목적
+별도 Operations Account에 Prometheus + Grafana + AlertManager 기반 모니터링 환경을 구성한다.
+(ADR-002에서 결정한 "모니터링 계정 분리" 구현)
+
+### 아키텍처 결정
+- 모니터링을 Service Account와 분리 → 서비스 장애 시에도 모니터링 독립 동작
+- EKS 위에 kube-prometheus-stack Helm chart로 통합 배포
+- Cross-account로 Service Account 메트릭 수집 (IRSA + AssumeRole)
+- 알람: SNS → Email + Slack(Lambda)
+
+### 생성한 파일 (`infra/terraform/operations/`)
+
+| 파일 | 역할 |
+|------|------|
+| `provider.tf` | AWS + Kubernetes + Helm provider, S3 backend |
+| `variables.tf` | 변수 정의 (EKS, Grafana, 알람 설정) |
+| `main.tf` | VPC + TGW attachment |
+| `eks.tf` | 모니터링 전용 EKS + Node Group + IAM |
+| `monitoring-stack.tf` | kube-prometheus-stack Helm 배포, EBS CSI, StorageClass |
+| `alerting.tf` | SNS Topics + Slack Lambda + CloudWatch Dashboard |
+| `iam-cross-account.tf` | Service Account 읽기 전용 접근, Prometheus IRSA |
+| `outputs.tf` | 출력값 (Grafana 접근 방법 등) |
+| `terraform.tfvars.example` | 변수 예시 파일 |
+
+### 모니터링 스택 구성
+
+```
+┌─ Operations EKS ──────────────────────────────┐
+│                                               │
+│  Namespace: monitoring                        │
+│  ┌─────────────┐  ┌─────────┐  ┌──────────┐  │
+│  │ Prometheus  │  │ Grafana │  │AlertMgr  │  │
+│  │ (30d 보관)  │  │ (대시보드)│  │(알람 라우팅)│  │
+│  └──────┬──────┘  └────┬────┘  └─────┬────┘  │
+│         │              │             │        │
+│         │ scrape       │ query       │ notify │
+└─────────┼──────────────┼─────────────┼────────┘
+          │              │             │
+          ▼              │             ▼
+  Service Account        │        SNS Topics
+  (10.10.0.0/16)         │        ├── Email
+  via TGW                │        └── Lambda → Slack
+                         │
+                    Port-forward
+                    또는 Internal ALB
+```
+
+### 알람 흐름
+```
+메트릭 이상 감지 → Prometheus Alert Rule 발동
+  → AlertManager 수신
+    → severity=critical: SNS(critical) → Email + Slack
+    → severity=warning:  SNS(alerts) → Email
+```
+
+### 나중에 실행할 명령어 (AWS 권한 설정 후)
+```bash
+# 4. Operations 배포 (Landing Zone의 TGW ID + Service Account ID 필요)
+cd infra/terraform/operations
+cp terraform.tfvars.example terraform.tfvars
+# terraform.tfvars 값 설정:
+#   - transit_gateway_id: Landing Zone에서 가져옴
+#   - service_account_id: Service Account의 AWS Account ID
+#   - grafana_admin_password: 원하는 비밀번호
+#   - alert_email: 알람 수신 이메일
+#   - slack_webhook_url: (선택) Slack incoming webhook URL
+
+terraform init
+terraform plan
+terraform apply
+
+# 5. Grafana 접속 확인
+aws eks update-kubeconfig --name cdp-ops-monitoring --region ap-northeast-2
+kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80 -n monitoring
+# 브라우저에서 http://localhost:3000 접속 (admin / 설정한 비밀번호)
+```
+
+### 배운 점
+- `kube-prometheus-stack` Helm chart = Prometheus + Grafana + AlertManager + node-exporter 한방 설치
+- IRSA (IAM Roles for Service Accounts)로 Pod 단위 IAM 권한 부여 가능
+- EBS CSI Driver가 있어야 PersistentVolume (gp3) 사용 가능
+- Cross-account 메트릭 수집은 TGW 네트워크 + IAM AssumeRole 두 가지 다 필요
+- AlertManager → SNS 연동으로 AWS 네이티브 알람 채널 활용
+- Lambda로 Slack webhook 호출하면 별도 서버 없이 알람 전달 가능
+- CloudWatch Dashboard는 cross-account 메트릭도 한 화면에 표시 가능
+
+---
+
 ## 다음 단계 (예정)
-- [ ] 모니터링 스택 (Prometheus + Grafana on EKS, CloudWatch)
-- [ ] CI/CD 파이프라인 (GitHub Actions)
+- [ ] Landing Zone에 Organizations + Identity Center Terraform 추가
+- [ ] CI/CD 파이프라인 (GitHub Actions → terraform plan/apply)
 - [ ] 실제 AWS 연결 및 terraform apply 테스트
-- [ ] 보안 강화 (Security Hub, GuardDuty)
+- [ ] 보안 강화 (Security Hub, GuardDuty, Config Rules)
