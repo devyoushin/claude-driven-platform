@@ -1,0 +1,187 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "Landing Zone ALB/WAF 트래픽 대시보드",
+  "editable": true,
+  "panels": [
+    {
+      "title": "Total Requests (ALB)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(aws_alb_request_count_sum[5m])) * 60",
+          "legendFormat": "req/min"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      }
+    },
+    {
+      "title": "HTTP 5xx Rate",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(aws_alb_httpcode_target_5xx_count_sum[5m]))",
+          "legendFormat": "5xx/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "WAF Blocked Requests",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(aws_waf_blocked_requests_sum[5m])) * 60",
+          "legendFormat": "Blocked/min"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 100 },
+              { "color": "red", "value": 1000 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Response Time (p95)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(aws_alb_target_response_time_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "red", "value": 2 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Request Rate by Status Code",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(aws_alb_httpcode_target_2xx_count_sum[5m]))",
+          "legendFormat": "2xx"
+        },
+        {
+          "expr": "sum(rate(aws_alb_httpcode_target_3xx_count_sum[5m]))",
+          "legendFormat": "3xx"
+        },
+        {
+          "expr": "sum(rate(aws_alb_httpcode_target_4xx_count_sum[5m]))",
+          "legendFormat": "4xx"
+        },
+        {
+          "expr": "sum(rate(aws_alb_httpcode_target_5xx_count_sum[5m]))",
+          "legendFormat": "5xx"
+        }
+      ]
+    },
+    {
+      "title": "Response Time Distribution",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(aws_alb_target_response_time_bucket[5m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(aws_alb_target_response_time_bucket[5m])) by (le))",
+          "legendFormat": "p90"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(aws_alb_target_response_time_bucket[5m])) by (le))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "title": "WAF Rules - Block Count by Rule",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "expr": "sum by(rule_group) (rate(aws_waf_blocked_requests_sum[5m]))",
+          "legendFormat": "{{ rule_group }}"
+        }
+      ]
+    },
+    {
+      "title": "Active Connections",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        {
+          "expr": "aws_alb_active_connection_count_sum",
+          "legendFormat": "Active Connections"
+        },
+        {
+          "expr": "aws_alb_new_connection_count_sum",
+          "legendFormat": "New Connections"
+        }
+      ]
+    },
+    {
+      "title": "Data Transfer",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
+      "targets": [
+        {
+          "expr": "sum(rate(aws_alb_processed_bytes_sum[5m]))",
+          "legendFormat": "Processed Bytes"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        }
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["landing-zone", "alb", "waf", "traffic"],
+  "time": { "from": "now-6h", "to": "now" },
+  "title": "Landing Zone Traffic",
+  "uid": "cdp-landing-zone-traffic"
+}

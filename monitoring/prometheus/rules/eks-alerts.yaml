@@ -1,0 +1,165 @@
+###############################################################################
+# PrometheusRule - EKS / Kubernetes 알람 규칙
+###############################################################################
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: eks-alerts
+  namespace: monitoring
+  labels:
+    app: prometheus
+    release: kube-prometheus-stack
+    role: alert-rules
+spec:
+  groups:
+    ###########################################################################
+    # Pod Alerts
+    ###########################################################################
+    - name: kubernetes.pods
+      rules:
+        # Pod CrashLoopBackOff
+        - alert: PodCrashLoopBackOff
+          expr: |
+            max_over_time(kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"}[5m]) >= 1
+          for: 5m
+          labels:
+            severity: critical
+            component: kubernetes
+          annotations:
+            summary: "Pod CrashLoopBackOff ({{ $labels.namespace }}/{{ $labels.pod }})"
+            description: "{{ $labels.namespace }}/{{ $labels.pod }} 컨테이너가 반복적으로 crash되고 있습니다."
+
+        # Pod Pending 상태 지속
+        - alert: PodPendingTooLong
+          expr: |
+            kube_pod_status_phase{phase="Pending"} == 1
+          for: 10m
+          labels:
+            severity: warning
+            component: kubernetes
+          annotations:
+            summary: "Pod Pending 상태 지속 ({{ $labels.namespace }}/{{ $labels.pod }})"
+            description: "{{ $labels.namespace }}/{{ $labels.pod }}가 10분 이상 Pending 상태입니다. 리소스 부족 또는 스케줄링 문제 확인 필요."
+
+        # Pod 재���작 횟수 증가
+        - alert: PodHighRestartCount
+          expr: |
+            increase(kube_pod_container_status_restarts_total[1h]) > 5
+          for: 0m
+          labels:
+            severity: warning
+            component: kubernetes
+          annotations:
+            summary: "Pod 재시작 빈번 ({{ $labels.namespace }}/{{ $labels.pod }})"
+            description: "{{ $labels.namespace }}/{{ $labels.pod }}가 지난 1시간 동안 {{ $value }}회 재시작되었습니다."
+
+        # OOMKilled
+        - alert: ContainerOOMKilled
+          expr: |
+            kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+          for: 0m
+          labels:
+            severity: warning
+            component: kubernetes
+          annotations:
+            summary: "Container OOMKilled ({{ $labels.namespace }}/{{ $labels.pod }})"
+            description: "{{ $labels.namespace }}/{{ $labels.pod }}의 {{ $labels.container }}가 OOMKilled 되었습니다. ���모리 limit 상향 ���토 필요."
+
+    ###########################################################################
+    # Deployment Alerts
+    ###########################################################################
+    - name: kubernetes.deployments
+      rules:
+        # Deployment replica 불일치
+        - alert: DeploymentReplicasMismatch
+          expr: |
+            kube_deployment_spec_replicas != kube_deployment_status_ready_replicas
+          for: 10m
+          labels:
+            severity: warning
+            component: kubernetes
+          annotations:
+            summary: "Deployment replica 불일치 ({{ $labels.namespace }}/{{ $labels.deployment }})"
+            description: "{{ $labels.namespace }}/{{ $labels.deployment }}의 desired={{ $labels.spec_replicas }}, ready 수가 10분 이상 불일치."
+
+        # Deployment generation mismatch (rollout 실패)
+        - alert: DeploymentGenerationMismatch
+          expr: |
+            kube_deployment_status_observed_generation != kube_deployment_metadata_generation
+          for: 15m
+          labels:
+            severity: critical
+            component: kubernetes
+          annotations:
+            summary: "Deployment rollout 실패 ({{ $labels.namespace }}/{{ $labels.deployment }})"
+            description: "{{ $labels.namespace }}/{{ $labels.deployment }}의 rollout��� 15분 이상 진행되지 않습니다."
+
+    ###########################################################################
+    # Resource Quota / Limits
+    ###########################################################################
+    - name: kubernetes.resources
+      rules:
+        # Container CPU throttling
+        - alert: ContainerCpuThrottlingHigh
+          expr: |
+            sum by(namespace, pod, container) (
+              rate(container_cpu_cfs_throttled_periods_total[5m])
+            ) /
+            sum by(namespace, pod, container) (
+              rate(container_cpu_cfs_periods_total[5m])
+            ) * 100 > 50
+          for: 10m
+          labels:
+            severity: warning
+            component: kubernetes
+          annotations:
+            summary: "CPU Throttling 높음 ({{ $labels.namespace }}/{{ $labels.pod }})"
+            description: "{{ $labels.pod }}/{{ $labels.container }}의 CPU throttling이 {{ $value | printf \"%.1f\" }}%입니다. CPU limit 상향 검토 필요."
+
+        # Namespace ResourceQuota 초과 임박
+        - alert: NamespaceQuotaAlmostFull
+          expr: |
+            kube_resourcequota{type="used"} / ignoring(type)
+            kube_resourcequota{type="hard"} * 100 > 80
+          for: 5m
+          labels:
+            severity: warning
+            component: kubernetes
+          annotations:
+            summary: "ResourceQuota 80% 초과 ({{ $labels.namespace }})"
+            description: "{{ $labels.namespace }}의 {{ $labels.resource }} 사용량이 quota의 {{ $value | printf \"%.0f\" }}%입니다."
+
+    ###########################################################################
+    # HPA (Horizontal Pod Autoscaler)
+    ###########################################################################
+    - name: kubernetes.hpa
+      rules:
+        # HPA가 max replica에 도달
+        - alert: HPAMaxedOut
+          expr: |
+            kube_horizontalpodautoscaler_status_current_replicas == kube_horizontalpodautoscaler_spec_max_replicas
+          for: 15m
+          labels:
+            severity: warning
+            component: kubernetes
+          annotations:
+            summary: "HPA max replica 도달 ({{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler }})"
+            description: "{{ $labels.horizontalpodautoscaler }}가 15분 이상 max replica({{ $value }})에 도달해 있습니다. 스케일업 불가 상태."
+
+    ###########################################################################
+    # PersistentVolume
+    ###########################################################################
+    - name: kubernetes.storage
+      rules:
+        # PV 사용률 80% 이상
+        - alert: PersistentVolumeAlmostFull
+          expr: |
+            kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes * 100 > 80
+          for: 5m
+          labels:
+            severity: warning
+            component: kubernetes
+          annotations:
+            summary: "PV 용량 부족 ({{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }})"
+            description: "{{ $labels.persistentvolumeclaim }}의 사용률이 {{ $value | printf \"%.1f\" }}%입니다."

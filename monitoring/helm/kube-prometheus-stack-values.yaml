@@ -1,0 +1,300 @@
+###############################################################################
+# kube-prometheus-stack Helm Values
+# Chart: https://github.com/prometheus-community/helm-charts
+# 이 파일이 Terraform monitoring-stack.tf의 set 블록을 대체함
+###############################################################################
+
+# ===========================================================================
+# Global
+# ===========================================================================
+fullnameOverride: "cdp-monitoring"
+
+# ===========================================================================
+# Prometheus
+# ===========================================================================
+prometheus:
+  prometheusSpec:
+    # 데이터 보관 기간
+    retention: 30d
+    retentionSize: "45GB"
+
+    # 스토리지
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 50Gi
+
+    # 리소스
+    resources:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+
+    # Cross-account 메트릭 수집을 위한 추가 scrape configs
+    additionalScrapeConfigs:
+      # Service Account node-exporter (TGW 경유)
+      - job_name: 'service-node-exporter'
+        ec2_sd_configs:
+          - region: ap-northeast-2
+            port: 9100
+            filters:
+              - name: "vpc-id"
+                values: ["vpc-service"]  # 실제 VPC ID로 교체 필요
+        relabel_configs:
+          - source_labels: [__meta_ec2_tag_Component]
+            regex: service
+            action: keep
+          - source_labels: [__meta_ec2_instance_id]
+            target_label: instance
+          - source_labels: [__meta_ec2_availability_zone]
+            target_label: availability_zone
+
+      # RDS Exporter
+      - job_name: 'rds-exporter'
+        static_configs:
+          - targets: ['rds-exporter.monitoring.svc.cluster.local:9042']
+            labels:
+              account: service
+              component: database
+
+    # ServiceMonitor selector (모든 namespace에서 수집)
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorNamespaceSelector:
+      any: true
+
+    # PodMonitor selector
+    podMonitorSelectorNilUsesHelmValues: false
+    podMonitorNamespaceSelector:
+      any: true
+
+    # PrometheusRule selector
+    ruleSelectorNilUsesHelmValues: false
+    ruleNamespaceSelector:
+      any: true
+
+  # Prometheus Service
+  service:
+    type: ClusterIP
+
+# ===========================================================================
+# Grafana
+# ===========================================================================
+grafana:
+  enabled: true
+
+  adminUser: admin
+  # adminPassword는 Terraform에서 secret으로 주입
+
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClassName: gp3
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+  # Ingress (AWS ALB)
+  ingress:
+    enabled: true
+    ingressClassName: alb
+    annotations:
+      alb.ingress.kubernetes.io/scheme: internal
+      alb.ingress.kubernetes.io/target-type: ip
+      alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS": 443}]'
+      alb.ingress.kubernetes.io/certificate-arn: ""  # ACM 인증서 ARN
+      alb.ingress.kubernetes.io/healthcheck-path: /api/health
+    hosts:
+      - grafana.internal.cdp.io
+
+  # Datasources
+  additionalDataSources:
+    - name: CloudWatch
+      type: cloudwatch
+      access: proxy
+      jsonData:
+        authType: default
+        defaultRegion: ap-northeast-2
+      editable: false
+
+  # Dashboard providers - dashboards/ 디렉토리에서 자동 로드
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: 'infrastructure'
+          orgId: 1
+          folder: 'Infrastructure'
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/infrastructure
+        - name: 'application'
+          orgId: 1
+          folder: 'Application'
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/application
+
+  # Grafana 기본 설정
+  grafana.ini:
+    server:
+      root_url: https://grafana.internal.cdp.io
+    auth:
+      disable_login_form: false
+    auth.anonymous:
+      enabled: false
+    alerting:
+      enabled: true
+    unified_alerting:
+      enabled: true
+
+  # Sidecar (ConfigMap으로 대시보드 자동 로드)
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      folder: /var/lib/grafana/dashboards
+      folderAnnotation: grafana_folder
+    datasources:
+      enabled: true
+      label: grafana_datasource
+
+# ===========================================================================
+# AlertManager
+# ===========================================================================
+alertmanager:
+  alertmanagerSpec:
+    retention: 120h
+
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+  # AlertManager config는 별도 alertmanager-config.yaml에서 관리
+  # configSecret을 사용하여 주입
+  config:
+    global:
+      resolve_timeout: 5m
+
+    route:
+      group_by: ['alertname', 'namespace', 'severity']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: 'default'
+      routes:
+        - match:
+            severity: critical
+          receiver: 'critical'
+          repeat_interval: 1h
+        - match:
+            severity: warning
+          receiver: 'warning'
+          repeat_interval: 4h
+        - match:
+            alertname: Watchdog
+          receiver: 'null'
+
+    receivers:
+      - name: 'null'
+      - name: 'default'
+        sns_configs:
+          - topic_arn: ''  # Terraform에서 주입
+            region: ap-northeast-2
+            subject: '{{ template "sns.default.subject" . }}'
+            message: '{{ template "sns.default.message" . }}'
+      - name: 'warning'
+        sns_configs:
+          - topic_arn: ''  # alerts topic ARN
+            region: ap-northeast-2
+            subject: '[WARNING] {{ .GroupLabels.alertname }}'
+      - name: 'critical'
+        sns_configs:
+          - topic_arn: ''  # critical-alerts topic ARN
+            region: ap-northeast-2
+            subject: '[CRITICAL] {{ .GroupLabels.alertname }}'
+
+    templates:
+      - '/etc/alertmanager/config/*.tmpl'
+
+# ===========================================================================
+# Node Exporter (Operations 클러스터 자체 모니터링)
+# ===========================================================================
+nodeExporter:
+  enabled: true
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ===========================================================================
+# kube-state-metrics
+# ===========================================================================
+kubeStateMetrics:
+  enabled: true
+
+# ===========================================================================
+# Default Rules (기본 제공 알람 규칙)
+# ===========================================================================
+defaultRules:
+  create: true
+  rules:
+    alertmanager: true
+    etcd: false  # EKS managed이므로 불필요
+    configReloaders: true
+    general: true
+    k8s: true
+    kubeApiserverAvailability: true
+    kubeApiserverBurnrate: true
+    kubeApiserverHistogram: true
+    kubeApiserverSlos: true
+    kubeControllerManager: false  # EKS managed
+    kubelet: true
+    kubeProxy: false  # EKS managed
+    kubePrometheusGeneral: true
+    kubePrometheusNodeRecording: true
+    kubernetesApps: true
+    kubernetesResources: true
+    kubernetesStorage: true
+    kubernetesSystem: true
+    kubeSchedulerAlerting: false  # EKS managed
+    kubeSchedulerRecording: false
+    network: true
+    node: true
+    nodeExporterAlerting: true
+    nodeExporterRecording: true
+    prometheus: true
+    prometheusOperator: true

@@ -1,0 +1,26 @@
+###############################################################################
+# ServiceMonitor - Node Exporter (Operations 클러스터 노드)
+###############################################################################
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: node-exporter
+  namespace: monitoring
+  labels:
+    app: prometheus
+    release: kube-prometheus-stack
+spec:
+  endpoints:
+    - port: http-metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_node_name]
+          targetLabel: node
+        - targetLabel: cluster
+          replacement: cdp-ops-monitoring
+  jobLabel: node-exporter
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus-node-exporter

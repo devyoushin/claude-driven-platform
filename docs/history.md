@@ -378,8 +378,90 @@ gh secret set INFRACOST_API_KEY --body "ico-xxxxx"
 
 ---
 
+## Step 6: 모니터링 CRD 및 설정 파일 작성 (2026-05-17)
+
+### 목적
+Prometheus/Grafana/AlertManager의 실제 설정을 CRD 기반으로 관리한다.
+무엇을 수집하고, 어떤 조건에서 알람을 보내고, 대시보드에 무엇을 보여줄지 정의.
+
+### 생성한 파일
+
+| 파일 | 역할 |
+|------|------|
+| `monitoring/helm/kube-prometheus-stack-values.yaml` | Helm chart 전체 values (Terraform set 대체) |
+| `monitoring/prometheus/servicemonitors/eks-service-account.yaml` | Service EKS 워크로드 스크래핑 |
+| `monitoring/prometheus/servicemonitors/node-exporter.yaml` | Operations 노드 메트릭 |
+| `monitoring/prometheus/servicemonitors/rds-exporter.yaml` | RDS PostgreSQL + Exporter Deployment |
+| `monitoring/prometheus/rules/infra-alerts.yaml` | Node 알람 (CPU/Memory/Disk/Network/Down) |
+| `monitoring/prometheus/rules/eks-alerts.yaml` | K8s 알람 (Pod/Deployment/HPA/PV) |
+| `monitoring/prometheus/rules/rds-alerts.yaml` | DB 알람 (Connection/Slow Query/Deadlock) |
+| `monitoring/grafana/dashboards/cluster-overview.json` | EKS 클러스터 현황 대시보드 |
+| `monitoring/grafana/dashboards/rds-overview.json` | RDS PostgreSQL 상세 대시보드 |
+| `monitoring/grafana/dashboards/landing-zone-traffic.json` | ALB/WAF 트래픽 대시보드 |
+| `monitoring/alerting/alertmanager-config.yaml` | AlertManager 라우팅/수신자/억제 규칙 |
+| `monitoring/README.md` | 모니터링 구조 설명 + 배포 방법 |
+
+### CRD 종류 및 역할
+```
+ServiceMonitor (monitoring.coreos.com/v1)
+  → "무엇을 수집할지" 정의 (target, interval, path)
+
+PrometheusRule (monitoring.coreos.com/v1)
+  → "어떤 조건에서 알람을 발생시킬지" 정의 (expr, for, severity)
+
+ConfigMap (grafana_dashboard label)
+  → Grafana sidecar가 자동 로드하는 대시보드 JSON
+```
+
+### AlertManager 라우팅 구조
+```
+모든 알람
+  ├── severity=critical → critical-alerts (Email + Slack, 30분 반복)
+  ├── component=database → database-alerts (DB 전용 채널)
+  ├── component=infrastructure → infra-alerts
+  ├── component=kubernetes → platform-alerts
+  ├── severity=warning → warning-alerts (4시간 반복)
+  ├── alertname=Watchdog → null (무시)
+  └── 나머지 → default
+
+억제 규칙 (Inhibit):
+  - NodeDown이면 해당 노드의 다른 알람 억제
+  - Critical이면 같은 대상의 Warning 억제
+```
+
+### 나중에 실행할 명령어
+```bash
+# CRD 리소스 적용
+kubectl apply -f monitoring/prometheus/servicemonitors/
+kubectl apply -f monitoring/prometheus/rules/
+
+# Grafana 대시보드 ConfigMap 생성
+kubectl create configmap grafana-dashboard-cluster \
+  --from-file=monitoring/grafana/dashboards/cluster-overview.json \
+  -n monitoring
+kubectl label configmap grafana-dashboard-cluster grafana_dashboard=1 -n monitoring
+
+# RDS Exporter 시크릿 생성
+kubectl create secret generic rds-exporter-credentials \
+  --from-literal=uri="rds-endpoint:5432/cdpdb?sslmode=require" \
+  --from-literal=username="monitoring_user" \
+  --from-literal=password="password" \
+  -n monitoring
+```
+
+### 배운 점
+- kube-prometheus-stack의 `*SelectorNilUsesHelmValues: false`로 설정해야 커스텀 CRD를 수집함
+- ServiceMonitor의 `relabelings`로 cross-cluster 라벨(cluster, account) 추가 가능
+- PrometheusRule에 `for` 필드로 flapping 방지 (일시적 스파이크 무시)
+- AlertManager `inhibit_rules`로 상위 알람 발생 시 하위 알람 억제 (노이즈 감소)
+- Grafana sidecar가 `grafana_dashboard=1` 라벨이 있는 ConfigMap을 자동 로드
+- RDS Exporter는 별도 Deployment로 배포하고 ServiceMonitor로 연결
+- `metricRelabelings`로 불필요한 메트릭 drop하여 카디널리티 관리
+
+---
+
 ## 다음 단계 (예정)
 - [ ] 실제 AWS 연결 및 terraform apply 테스트
 - [ ] 보안 강화 (Security Hub, GuardDuty, Config Rules)
-- [ ] 샘플 애플리케이션 배포 (EKS)
-- [ ] Grafana 대시보드 JSON 작성
+- [ ] 샘플 애플리케이션 배포 (EKS + Dockerfile + Helm chart)
+- [ ] Terraform에서 monitoring/ 파일 참조하도록 연결

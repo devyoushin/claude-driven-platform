@@ -1,0 +1,119 @@
+###############################################################################
+# ServiceMonitor - RDS Exporter (PostgreSQL 메트릭)
+# prometheus-community/postgres_exporter를 별도 배포 후 연결
+###############################################################################
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: rds-postgres-exporter
+  namespace: monitoring
+  labels:
+    app: prometheus
+    release: kube-prometheus-stack
+    component: database
+spec:
+  endpoints:
+    - port: http-metrics
+      interval: 60s
+      scrapeTimeout: 30s
+      path: /metrics
+      metricRelabelings:
+        # 불필요한 메트릭 드롭 (카디널리티 관리)
+        - sourceLabels: [__name__]
+          regex: 'pg_stat_bgwriter_.*'
+          action: drop
+        # account 라벨 추가
+        - targetLabel: account
+          replacement: service
+        - targetLabel: db_instance
+          replacement: cdp-service-postgres
+  selector:
+    matchLabels:
+      app: rds-exporter
+
+---
+###############################################################################
+# RDS Exporter Deployment
+###############################################################################
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rds-exporter
+  namespace: monitoring
+  labels:
+    app: rds-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rds-exporter
+  template:
+    metadata:
+      labels:
+        app: rds-exporter
+    spec:
+      serviceAccountName: rds-exporter
+      containers:
+        - name: postgres-exporter
+          image: prometheuscommunity/postgres-exporter:v0.15.0
+          ports:
+            - name: http-metrics
+              containerPort: 9187
+          env:
+            - name: DATA_SOURCE_URI
+              valueFrom:
+                secretKeyRef:
+                  name: rds-exporter-credentials
+                  key: uri
+            - name: DATA_SOURCE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rds-exporter-credentials
+                  key: username
+            - name: DATA_SOURCE_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: rds-exporter-credentials
+                  key: password
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http-metrics
+            initialDelaySeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http-metrics
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rds-exporter
+  namespace: monitoring
+  labels:
+    app: rds-exporter
+spec:
+  ports:
+    - name: http-metrics
+      port: 9187
+      targetPort: http-metrics
+  selector:
+    app: rds-exporter
+
+---
+# Secret은 수동 생성 또는 External Secrets Operator로 관리
+# kubectl create secret generic rds-exporter-credentials \
+#   --from-literal=uri="cdp-service-postgres.xxxx.ap-northeast-2.rds.amazonaws.com:5432/cdpdb?sslmode=require" \
+#   --from-literal=username="monitoring_user" \
+#   --from-literal=password="xxxx" \
+#   -n monitoring

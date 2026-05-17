@@ -1,0 +1,116 @@
+###############################################################################
+# PrometheusRule - 인프라 알람 규칙
+# Node(EC2) 레벨 모니터링
+###############################################################################
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: infra-alerts
+  namespace: monitoring
+  labels:
+    app: prometheus
+    release: kube-prometheus-stack
+    role: alert-rules
+spec:
+  groups:
+    ###########################################################################
+    # Node (EC2) Alerts
+    ###########################################################################
+    - name: node.rules
+      rules:
+        # CPU 사용률 80% 이상 5분 지속
+        - alert: NodeHighCpuUsage
+          expr: |
+            (1 - avg by(instance, node) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 100 > 80
+          for: 5m
+          labels:
+            severity: warning
+            component: infrastructure
+          annotations:
+            summary: "Node CPU 사용률 높음 ({{ $labels.node }})"
+            description: "{{ $labels.node }}의 CPU 사용률이 {{ $value | printf \"%.1f\" }}%로 5분 이상 80%를 초과했습니다."
+            runbook_url: "https://github.com/devyoushin/claude-driven-platform/wiki/runbook-node-cpu"
+
+        # CPU 사용률 95% 이상 - Critical
+        - alert: NodeCriticalCpuUsage
+          expr: |
+            (1 - avg by(instance, node) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 100 > 95
+          for: 3m
+          labels:
+            severity: critical
+            component: infrastructure
+          annotations:
+            summary: "Node CPU Critical ({{ $labels.node }})"
+            description: "{{ $labels.node }}의 CPU 사용률이 {{ $value | printf \"%.1f\" }}%입니다. 즉시 확인 필요."
+
+        # 메모리 사용률 85% 이상
+        - alert: NodeHighMemoryUsage
+          expr: |
+            (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 85
+          for: 5m
+          labels:
+            severity: warning
+            component: infrastructure
+          annotations:
+            summary: "Node 메모리 부족 ({{ $labels.node }})"
+            description: "{{ $labels.node }}의 메모리 사용률이 {{ $value | printf \"%.1f\" }}%입니다."
+
+        # 메모리 95% 이상 - Critical
+        - alert: NodeCriticalMemoryUsage
+          expr: |
+            (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 95
+          for: 2m
+          labels:
+            severity: critical
+            component: infrastructure
+          annotations:
+            summary: "Node 메모리 Critical ({{ $labels.node }})"
+            description: "{{ $labels.node }}의 메모리 사용률이 {{ $value | printf \"%.1f\" }}%입니다. OOM Kill 위험."
+
+        # 디스크 사용률 70% 이상
+        - alert: NodeDiskSpaceWarning
+          expr: |
+            (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 > 70
+          for: 10m
+          labels:
+            severity: warning
+            component: infrastructure
+          annotations:
+            summary: "디스크 공간 부족 ({{ $labels.node }})"
+            description: "{{ $labels.node }}의 {{ $labels.mountpoint }} 디스크 사용률 {{ $value | printf \"%.1f\" }}%"
+
+        # 디스크 사용률 90% 이상 - Critical
+        - alert: NodeDiskSpaceCritical
+          expr: |
+            (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 > 90
+          for: 5m
+          labels:
+            severity: critical
+            component: infrastructure
+          annotations:
+            summary: "디스크 공간 Critical ({{ $labels.node }})"
+            description: "{{ $labels.node }}의 {{ $labels.mountpoint }} 디스크 사용률 {{ $value | printf \"%.1f\" }}%. 즉시 조치 필요."
+
+        # 네트워크 에��
+        - alert: NodeNetworkErrors
+          expr: |
+            rate(node_network_receive_errs_total[5m]) + rate(node_network_transmit_errs_total[5m]) > 10
+          for: 5m
+          labels:
+            severity: warning
+            component: infrastructure
+          annotations:
+            summary: "네트워크 에러 발생 ({{ $labels.node }})"
+            description: "{{ $labels.node }}의 {{ $labels.device }}에서 네트워크 에러가 지속적으로 발생 중"
+
+        # Node 다운
+        - alert: NodeDown
+          expr: up{job=~".*node-exporter.*"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            component: infrastructure
+          annotations:
+            summary: "Node 다운 ({{ $labels.instance }})"
+            description: "{{ $labels.instance }}에서 2분 이상 메트릭 수집 불가. Node가 다운�����을 수 있습니다."

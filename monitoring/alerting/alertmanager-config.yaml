@@ -1,0 +1,177 @@
+###############################################################################
+# AlertManager Configuration
+# 이 파일은 kube-prometheus-stack values의 alertmanager.config를 상세 정의
+# 실제 배포 시 Helm values에 통합하거나 Secret으로 주입
+###############################################################################
+
+global:
+  resolve_timeout: 5m
+  # SMTP (Email 직접 발송 시)
+  # smtp_smarthost: 'email-smtp.ap-northeast-2.amazonaws.com:587'
+  # smtp_from: 'alerts@cdp.io'
+  # smtp_auth_username: 'AKIA...'
+  # smtp_auth_password: ''
+  # smtp_require_tls: true
+
+###############################################################################
+# Templates
+###############################################################################
+templates:
+  - '/etc/alertmanager/config/*.tmpl'
+
+###############################################################################
+# Route Tree - 알람 라우팅 규칙
+###############################################################################
+route:
+  # 기본 그룹핑
+  group_by: ['alertname', 'namespace', 'severity', 'component']
+  group_wait: 30s       # 같은 그룹의 알람 수집 대기 시간
+  group_interval: 5m    # 같은 그룹 재알림 간격
+  repeat_interval: 4h   # 동일 알람 반복 알림 간격
+  receiver: 'default'
+
+  routes:
+    # ─────────────────────────────────────────────────────────
+    # Critical: 즉시 알림 (Email + Slack)
+    # ─────────────────────────────────────────────────────────
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      repeat_interval: 30m
+      continue: false
+
+    # ─────────────────────────────────────────────────────────
+    # Database: DB팀 전용 채널
+    # ─────────────────────────────────────────────────────────
+    - match:
+        component: database
+      receiver: 'database-alerts'
+      repeat_interval: 2h
+      routes:
+        - match:
+            severity: critical
+          receiver: 'critical-alerts'
+          repeat_interval: 15m
+
+    # ─────────────────────────────────────────────────────────
+    # Infrastructure: 인프라팀
+    # ─────────────────────────────────────────────────────────
+    - match:
+        component: infrastructure
+      receiver: 'infra-alerts'
+      repeat_interval: 4h
+
+    # ─────────────────────────────────────────────────────────
+    # Kubernetes: 플랫폼팀
+    # ─────────────────────────────────────────────────────────
+    - match:
+        component: kubernetes
+      receiver: 'platform-alerts'
+      repeat_interval: 2h
+
+    # ─────────────────────────────────────────────────────────
+    # Watchdog: 무시 (AlertManager 살아있는지 확인용)
+    # ─────────────────────────────────────────────────────────
+    - match:
+        alertname: Watchdog
+      receiver: 'null'
+
+    # ─────────────────────────────────────────────────────────
+    # Warning: 일반 알림
+    # ─────────────────────────────────────────────────────────
+    - match:
+        severity: warning
+      receiver: 'warning-alerts'
+      repeat_interval: 4h
+
+###############################################################################
+# Receivers - 알림 수신자 정의
+###############################################################################
+receivers:
+  # Null (무시)
+  - name: 'null'
+
+  # 기본 수신자
+  - name: 'default'
+    sns_configs:
+      - topic_arn: 'arn:aws:sns:ap-northeast-2:ACCOUNT_ID:cdp-ops-alerts'
+        region: ap-northeast-2
+        subject: '[CDP] {{ .GroupLabels.alertname }}'
+        message: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Labels.alertname }}
+          *Severity:* {{ .Labels.severity }}
+          *Description:* {{ .Annotations.description }}
+          *Details:*
+            {{ range .Labels.SortedPairs }} - {{ .Name }}: {{ .Value }}
+            {{ end }}
+          {{ end }}
+
+  # Critical 알림 (Email + Slack)
+  - name: 'critical-alerts'
+    sns_configs:
+      - topic_arn: 'arn:aws:sns:ap-northeast-2:ACCOUNT_ID:cdp-ops-critical-alerts'
+        region: ap-northeast-2
+        subject: '[CRITICAL] {{ .GroupLabels.alertname }} - 즉시 확인 필요'
+        message: |
+          🚨 CRITICAL ALERT
+          {{ range .Alerts }}
+          Alert: {{ .Labels.alertname }}
+          Namespace: {{ .Labels.namespace }}
+          Description: {{ .Annotations.description }}
+          Started: {{ .StartsAt.Format "2006-01-02 15:04:05 KST" }}
+          {{ end }}
+
+  # Warning 알림
+  - name: 'warning-alerts'
+    sns_configs:
+      - topic_arn: 'arn:aws:sns:ap-northeast-2:ACCOUNT_ID:cdp-ops-alerts'
+        region: ap-northeast-2
+        subject: '[WARNING] {{ .GroupLabels.alertname }}'
+
+  # Database 전용
+  - name: 'database-alerts'
+    sns_configs:
+      - topic_arn: 'arn:aws:sns:ap-northeast-2:ACCOUNT_ID:cdp-ops-alerts'
+        region: ap-northeast-2
+        subject: '[DB] {{ .GroupLabels.alertname }}'
+        message: |
+          Database Alert
+          {{ range .Alerts }}
+          Alert: {{ .Labels.alertname }}
+          Instance: {{ .Labels.db_instance }}
+          Database: {{ .Labels.datname }}
+          Description: {{ .Annotations.description }}
+          {{ end }}
+
+  # Infrastructure 전용
+  - name: 'infra-alerts'
+    sns_configs:
+      - topic_arn: 'arn:aws:sns:ap-northeast-2:ACCOUNT_ID:cdp-ops-alerts'
+        region: ap-northeast-2
+        subject: '[INFRA] {{ .GroupLabels.alertname }}'
+
+  # Platform/Kubernetes 전용
+  - name: 'platform-alerts'
+    sns_configs:
+      - topic_arn: 'arn:aws:sns:ap-northeast-2:ACCOUNT_ID:cdp-ops-alerts'
+        region: ap-northeast-2
+        subject: '[K8S] {{ .GroupLabels.alertname }}'
+
+###############################################################################
+# Inhibit Rules - 상위 알람이 있으면 하위 알람 억제
+###############################################################################
+inhibit_rules:
+  # Node가 다운이면 해당 노드의 다른 알람 억제
+  - source_match:
+      alertname: NodeDown
+    target_match_re:
+      alertname: 'NodeHigh.*|NodeDisk.*'
+    equal: ['node']
+
+  # Critical이면 같은 대상의 Warning 억제
+  - source_match:
+      severity: critical
+    target_match:
+      severity: warning
+    equal: ['alertname', 'namespace', 'pod']
