@@ -1,0 +1,23 @@
+# Service Account Variables
+# 이 파일을 terraform.tfvars로 복사한 뒤 값을 채워 사용
+
+region      = "ap-northeast-2"
+environment = "prod"
+vpc_cidr    = "10.10.0.0/16"
+
+# Landing Zone에서 생성된 TGW ID
+transit_gateway_id = "tgw-xxxxxxxxxxxxxxxxx"
+
+# EKS
+eks_cluster_version     = "1.29"
+eks_node_instance_types = ["t3.medium"]
+eks_node_desired_size   = 2
+
+# EC2
+ec2_instance_type = "t3.medium"
+
+# RDS
+rds_instance_class    = "db.t3.medium"
+rds_engine_version    = "15.4"
+rds_allocated_storage = 20
+rds_password          = "CHANGE_ME"  # 실제로는 환경변수 TF_VAR_rds_password 사용 권장
