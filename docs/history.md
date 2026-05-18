@@ -460,8 +460,163 @@ kubectl create secret generic rds-exporter-credentials \
 
 ---
 
+## Step 7: 샘플 마이크로서비스 — crypto-price-api + crypto-alert-service (2026-05-17)
+
+### 목적
+EKS에 배포할 실제 애플리케이션 두 개를 작성한다. 인프라만이 아닌 "실제 서비스 운영" 시나리오를 보여준다.
+
+### 생성한 파일
+
+#### crypto-price-api (Go)
+| 파일 | 역할 |
+|------|------|
+| `apps/crypto-price-api/cmd/server/main.go` | 엔트리포인트, 서버 시작 |
+| `apps/crypto-price-api/internal/api/handlers.go` | REST 핸들러 (GET /prices, /prices/{symbol}) |
+| `apps/crypto-price-api/internal/api/middleware.go` | 로깅, 메트릭 미들웨어 |
+| `apps/crypto-price-api/internal/collector/binance.go` | Binance WebSocket 가격 수집 |
+| `apps/crypto-price-api/internal/models/price.go` | 데이터 모델 |
+| `apps/crypto-price-api/internal/store/postgres.go` | PostgreSQL 저장소 |
+| `apps/crypto-price-api/internal/metrics/prometheus.go` | Custom Prometheus 메트릭 |
+| `apps/crypto-price-api/Dockerfile` | Multi-stage 빌드 (golang → alpine) |
+| `apps/crypto-price-api/helm/` | Helm chart (Deployment, Service, HPA, ServiceMonitor) |
+| `apps/crypto-price-api/go.mod` / `go.sum` | Go 의존성 |
+| `apps/crypto-price-api/configs/config.yaml` | 앱 설정 |
+
+#### crypto-alert-service (Python/FastAPI)
+| 파일 | 역할 |
+|------|------|
+| `apps/crypto-alert-service/app/main.py` | FastAPI 앱 + 알림 평가 루프 |
+| `apps/crypto-alert-service/app/models.py` | SQLAlchemy 모델 (Alert) |
+| `apps/crypto-alert-service/app/schemas.py` | Pydantic 스키마 |
+| `apps/crypto-alert-service/app/database.py` | 비동기 DB 세션 |
+| `apps/crypto-alert-service/app/evaluator.py` | 조건 평가 + SNS/Slack 발송 |
+| `apps/crypto-alert-service/Dockerfile` | Multi-stage 빌드 (python-slim) |
+| `apps/crypto-alert-service/helm/` | Helm chart |
+| `apps/crypto-alert-service/requirements.txt` | Python 의존성 |
+| `apps/crypto-alert-service/configs/config.yaml` | 앱 설정 |
+
+#### CI/CD & 로컬 개발
+| 파일 | 역할 |
+|------|------|
+| `docker-compose.yml` | 로컬 개발 환경 (PostgreSQL + 두 서비스) |
+| `.github/workflows/app-ci.yml` | Go test/lint, Python test/lint, Docker build, Helm lint |
+| `.github/workflows/app-deploy.yml` | ECR push + Helm upgrade (EKS 배포) |
+
+### 서비스 간 통신
+```
+crypto-price-api (Go, :8080)
+  ├── GET /prices         → 전체 가격 목록
+  ├── GET /prices/{symbol} → 특정 코인 가격
+  ├── GET /health         → 헬스체크
+  └── :9090/metrics       → Prometheus 메트릭
+
+crypto-alert-service (Python, :8000)
+  ├── POST /alerts        → 알림 생성
+  ├── GET /alerts         → 알림 목록
+  ├── DELETE /alerts/{id} → 알림 삭제
+  └── 내부: 30초마다 price-api 호출 → 조건 평가 → SNS/Slack
+```
+
+### 배운 점
+- Go의 `net/http` + `gorilla/mux`로 간단한 REST API 구현 가능
+- FastAPI의 `BackgroundTasks`로 주기적 평가 루프를 별도 goroutine 없이 실행
+- Docker multi-stage 빌드로 Go 바이너리 이미지 ~20MB, Python 이미지 ~150MB
+- Helm chart에 ServiceMonitor CRD를 포함하면 앱 배포만으로 모니터링 자동 연동
+- docker-compose의 `depends_on.condition: service_healthy`로 의존성 순서 보장
+
+---
+
+## Step 8: Terraform 포맷팅 및 검증 (2026-05-18)
+
+### 목적
+전체 Terraform 파일에 `terraform fmt`를 적용하고, lifecycle 설정 등의 경고를 수정한다.
+
+### 변경 내역
+- 전체 landing-zone, service, operations, modules 파일에 `terraform fmt` 적용
+- `cloudtrail.tf`: S3 lifecycle_configuration에 빈 `filter {}` 블록 추가 (AWS provider 5.x 경고 해소)
+- 주석 앞 이중 공백(`  #`) → 단일 공백(` #`)으로 통일
+
+### 수정된 파일 (13개)
+`cloudtrail.tf`, `identity-center.tf`, `scp.tf`, `vpc/main.tf`, `alerting.tf`, `iam-cross-account.tf`, `main.tf`, `monitoring-stack.tf`, `variables.tf`, `backup.tf`, `ec2.tf`, `rds.tf`, `go.mod`
+
+### 배운 점
+- `terraform fmt`는 HCL 코드의 정렬과 들여쓰기를 자동으로 표준화
+- S3 lifecycle rule에 `filter {}`가 없으면 AWS provider 5.x에서 경고 발생
+- CI/CD에서 `terraform fmt -check`를 넣으면 포맷 불일치를 PR 단계에서 잡을 수 있음
+
+---
+
+## Step 9: 보안 강화 — GuardDuty + Security Hub + Config Rules (2026-05-18)
+
+### 목적
+AWS 보안 서비스 3종을 Organization 전체에 활성화하여 위협 탐지, 보안 포스처 관리, 컴플라이언스를 자동화한다.
+
+### 생성한 파일 (`infra/terraform/landing-zone/`)
+
+| 파일 | 역할 |
+|------|------|
+| `guardduty.tf` | GuardDuty Organization-wide 위협 탐지 |
+| `security-hub.tf` | Security Hub 보안 포스처 관리 + 표준 활성화 |
+| `config-rules.tf` | AWS Config 녹화 + 컴플라이언스 규칙 13개 |
+
+### GuardDuty 설정
+- **탐지 범위**: S3 Logs, EKS Audit Logs, Malware Protection (EBS)
+- **Organization 설정**: 신규 계정 자동 등록 (`auto_enable_organization_members = "ALL"`)
+- **멤버 계정**: Service Account, Operations Account 등록
+- **알림**: HIGH/CRITICAL (severity ≥ 7) → EventBridge → SNS
+
+### Security Hub 설정
+- **보안 표준 2개**:
+  - AWS Foundational Security Best Practices v1.0.0
+  - CIS AWS Foundations Benchmark v1.4.0
+- **Organization**: 신규 계정 자동 등록
+- **알림**: CRITICAL/HIGH findings (NEW status) → EventBridge → SNS
+
+### AWS Config 설정
+- **Config Recorder**: 전체 리소스 유형 + Global 리소스 포함
+- **Delivery Channel**: S3 (KMS 암호화, Glacier 90일, 삭제 365일)
+- **Organization Aggregator**: 전 계정 / 전 리전 Config 데이터 수집
+- **Managed Rules 13개**:
+
+| # | Rule | 검사 대상 |
+|---|------|----------|
+| 1 | S3 Public Read Prohibited | S3 퍼블릭 읽기 차단 |
+| 2 | S3 Server-Side Encryption | S3 암호화 활성화 |
+| 3 | RDS Storage Encrypted | RDS 스토리지 암호화 |
+| 4 | RDS Multi-AZ Support | RDS 고가용성 |
+| 5 | RDS Public Access Check | RDS 퍼블릭 접근 차단 |
+| 6 | EC2 IMDSv2 Check | IMDSv2 필수 |
+| 7 | EBS Encryption by Default | EBS 기본 암호화 |
+| 8 | Root Account MFA | 루트 계정 MFA |
+| 9 | IAM Password Policy | IAM 비밀번호 정책 |
+| 10 | CloudTrail Enabled | CloudTrail 활성화 |
+| 11 | VPC Flow Logs Enabled | VPC Flow Logs |
+| 12 | Restricted SSH | SSH 0.0.0.0/0 차단 |
+| 13 | EKS Secrets Encrypted | EKS Secrets 암호화 |
+
+- **알림**: NON_COMPLIANT 변경 → EventBridge → SNS
+
+### SNS 토픽 구성 (보안 알림)
+```
+cdp-landing-guardduty-findings    → GuardDuty HIGH/CRITICAL
+cdp-landing-securityhub-findings  → Security Hub CRITICAL/HIGH
+cdp-landing-config-compliance     → Config NON_COMPLIANT
+```
+
+### 수정된 파일
+- `outputs.tf`: GuardDuty, Security Hub, Config 관련 출력값 6개 추가
+
+### 배운 점
+- GuardDuty/Security Hub/Config 모두 Organizations 위임 관리자 패턴으로 중앙 관리 가능
+- `aws_guardduty_organization_configuration`의 `auto_enable_organization_members`로 신규 계정 자동 보호
+- Security Hub Standards는 리전별 ARN이 다르므로 `var.region` 변수 활용
+- Config Rules의 `maximum_execution_frequency`는 주기적 평가 규칙에만 필요 (변경 트리거 규칙은 불필요)
+- EventBridge → SNS 패턴으로 세 서비스의 알림을 통합 관리
+- Config Aggregator로 멀티 계정/멀티 리전 컴플라이언스를 한 곳에서 확인
+
+---
+
 ## 다음 단계 (예정)
 - [ ] 실제 AWS 연결 및 terraform apply 테스트
-- [ ] 보안 강화 (Security Hub, GuardDuty, Config Rules)
-- [ ] 샘플 애플리케이션 배포 (EKS + Dockerfile + Helm chart)
+- [ ] docker-compose 로컬 빌드/실행 테스트
 - [ ] Terraform에서 monitoring/ 파일 참조하도록 연결

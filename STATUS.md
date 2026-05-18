@@ -1,6 +1,6 @@
 # Project Status
 
-> 마지막 업데이트: 2026-05-17
+> 마지막 업데이트: 2026-05-18
 
 ## 현재 진행 상황
 
@@ -16,15 +16,16 @@
 | 6 | CI/CD 파이프라인 | GitHub Actions (plan/apply/security/drift) + OIDC 인증 | 2026-05-17 |
 | 7 | 모니터링 CRD 설정 | ServiceMonitor 3개, PrometheusRule 3개(22개 알람), Grafana 대시보드 3개, AlertManager 라우팅 | 2026-05-17 |
 | 8 | 샘플 애플리케이션 | crypto-price-api (Go) + crypto-alert-service (Python), Dockerfile, Helm chart, CI/CD | 2026-05-17 |
+| 9 | Terraform fmt/검증 | 전체 모듈 terraform fmt 적용, lifecycle filter 수정 | 2026-05-18 |
+| 10 | 보안 강화 | GuardDuty(Org), Security Hub(CIS+Best Practices), Config Rules(13개), SNS 알림 | 2026-05-18 |
 
 ### 다음에 할 것 📋
 
 | 우선순위 | 항목 | 메모 |
 |----------|------|------|
 | 1 | AWS 연결 및 terraform apply 테스트 | AWS 계정 + CLI 설정 필요 |
-| 2 | 보안 강화 | Security Hub, GuardDuty, Config Rules |
-| 3 | Terraform 검증 | `terraform validate` + `terraform fmt` 로컬 확인 |
-| 4 | Go/Python 앱 로컬 테스트 | docker-compose로 로컬 실행 확인 |
+| 2 | Go/Python 앱 로컬 테스트 | docker-compose로 로컬 실행 확인 |
+| 3 | docs/history.md 업데이트 | Step 9~10 작업 내역 추가 |
 
 ### 블로커 / 대기 중 ⏸️
 
@@ -41,6 +42,7 @@
 3-Account Architecture (AWS ap-northeast-2)
 
 Landing Zone ─── Security, IAM(SSO), WAF, ALB, TGW, Organizations, CloudTrail
+                  └── GuardDuty, Security Hub, Config Rules (Org-wide)
 Service      ─── EKS, EC2(ASG), RDS(Multi-AZ), Backup
                   └── crypto-price-api (Go) + crypto-alert-service (Python)
 Operations   ─── EKS(monitoring), Prometheus, Grafana, AlertManager, SNS
@@ -86,6 +88,28 @@ Operations   ─── EKS(monitoring), Prometheus, Grafana, AlertManager, SNS
   - Landing Zone Traffic
 ```
 
+## 보안 현황
+
+```
+GuardDuty (Org-wide):
+  - S3 Protection, EKS Audit Logs, Malware Protection(EBS)
+  - 멤버 계정 자동 등록 (Service, Operations)
+  - HIGH/CRITICAL findings → SNS 알림
+
+Security Hub (Org-wide):
+  - AWS Foundational Security Best Practices v1.0.0
+  - CIS AWS Foundations Benchmark v1.4.0
+  - CRITICAL/HIGH findings → SNS 알림
+
+AWS Config (Org-wide):
+  - Config Recorder + Organization Aggregator
+  - Managed Rules 13개:
+    S3(public, encryption), RDS(encryption, multi-az, public),
+    EC2(IMDSv2, EBS encryption), IAM(root MFA, password policy),
+    CloudTrail, VPC Flow Logs, SSH restriction, EKS secrets
+  - NON_COMPLIANT → SNS 알림
+```
+
 ## 파일 구조 요약
 
 ```
@@ -96,7 +120,7 @@ claude-driven-platform/
 │   └── crypto-alert-service/   ← Python 서비스 (src + Dockerfile + Helm)
 ├── infra/terraform/
 │   ├── modules/                ← 공유 모듈 (vpc, tgw, tags)
-│   ├── landing-zone/           ← 9개 파일
+│   ├── landing-zone/           ← 12개 파일 (+guardduty, security-hub, config-rules)
 │   ├── service/                ← 9개 파일
 │   └── operations/             ← 9개 파일
 ├── monitoring/

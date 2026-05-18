@@ -46,3 +46,37 @@ output "sso_portal_url" {
   description = "IAM Identity Center SSO Portal URL"
   value       = "https://cdp.awsapps.com/start"
 }
+
+###############################################################################
+# Security
+###############################################################################
+
+output "guardduty_detector_id" {
+  description = "GuardDuty Detector ID"
+  value       = aws_guardduty_detector.main.id
+}
+
+output "securityhub_arn" {
+  description = "Security Hub ARN"
+  value       = aws_securityhub_account.main.arn
+}
+
+output "config_recorder_id" {
+  description = "AWS Config Recorder ID"
+  value       = aws_config_configuration_recorder.main.id
+}
+
+output "guardduty_sns_topic_arn" {
+  description = "SNS topic for GuardDuty HIGH/CRITICAL findings"
+  value       = aws_sns_topic.guardduty_findings.arn
+}
+
+output "securityhub_sns_topic_arn" {
+  description = "SNS topic for Security Hub CRITICAL/HIGH findings"
+  value       = aws_sns_topic.securityhub_findings.arn
+}
+
+output "config_sns_topic_arn" {
+  description = "SNS topic for Config non-compliant findings"
+  value       = aws_sns_topic.config_compliance.arn
+}
