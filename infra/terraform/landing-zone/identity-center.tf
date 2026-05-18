@@ -6,7 +6,7 @@
 data "aws_ssoadmin_instances" "main" {}
 
 locals {
-  sso_instance_arn = tolist(data.aws_ssoadmin_instances.main.arns)[0]
+  sso_instance_arn  = tolist(data.aws_ssoadmin_instances.main.arns)[0]
   identity_store_id = tolist(data.aws_ssoadmin_instances.main.identity_store_ids)[0]
 }
 
@@ -47,7 +47,7 @@ resource "aws_ssoadmin_permission_set" "admin" {
   name             = "AdministratorAccess"
   description      = "Full admin access"
   instance_arn     = local.sso_instance_arn
-  session_duration = "PT4H"  # 4시간 세션
+  session_duration = "PT4H" # 4시간 세션
 }
 
 resource "aws_ssoadmin_managed_policy_attachment" "admin" {
@@ -61,7 +61,7 @@ resource "aws_ssoadmin_permission_set" "service_deploy" {
   name             = "ServiceDeployAccess"
   description      = "Deploy and manage workloads in Service Account"
   instance_arn     = local.sso_instance_arn
-  session_duration = "PT8H"  # 8시간 세션 (개발 업무)
+  session_duration = "PT8H" # 8시간 세션 (개발 업무)
 }
 
 resource "aws_ssoadmin_permission_set_inline_policy" "service_deploy" {

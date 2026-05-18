@@ -22,7 +22,7 @@ resource "aws_backup_plan" "main" {
   rule {
     rule_name         = "daily-backup"
     target_vault_name = aws_backup_vault.main.name
-    schedule          = "cron(0 18 * * ? *)"  # UTC 18:00 = KST 03:00
+    schedule          = "cron(0 18 * * ? *)" # UTC 18:00 = KST 03:00
 
     lifecycle {
       delete_after = 7
@@ -40,7 +40,7 @@ resource "aws_backup_plan" "main" {
   rule {
     rule_name         = "weekly-backup"
     target_vault_name = aws_backup_vault.main.name
-    schedule          = "cron(0 18 ? * SUN *)"  # 매주 일요일
+    schedule          = "cron(0 18 ? * SUN *)" # 매주 일요일
 
     lifecycle {
       delete_after = 30
@@ -51,7 +51,7 @@ resource "aws_backup_plan" "main" {
   rule {
     rule_name         = "monthly-backup"
     target_vault_name = aws_backup_vault.main.name
-    schedule          = "cron(0 18 1 * ? *)"  # 매월 1일
+    schedule          = "cron(0 18 1 * ? *)" # 매월 1일
 
     lifecycle {
       cold_storage_after = 30

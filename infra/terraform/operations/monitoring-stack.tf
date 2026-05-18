@@ -51,7 +51,7 @@ resource "helm_release" "kube_prometheus_stack" {
 
   set {
     name  = "prometheus.prometheusSpec.additionalScrapeConfigs[0].static_configs[0].targets[0]"
-    value = "10.10.11.0:9100"  # Service VPC node-exporter (예시)
+    value = "10.10.11.0:9100" # Service VPC node-exporter (예시)
   }
 
   # Grafana 설정
@@ -114,12 +114,12 @@ resource "helm_release" "kube_prometheus_stack" {
           "dashboardproviders.yaml" = {
             apiVersion = 1
             providers = [{
-              name      = "default"
-              orgId     = 1
-              folder    = ""
-              type      = "file"
+              name            = "default"
+              orgId           = 1
+              folder          = ""
+              type            = "file"
               disableDeletion = false
-              editable  = true
+              editable        = true
               options = {
                 path = "/var/lib/grafana/dashboards/default"
               }

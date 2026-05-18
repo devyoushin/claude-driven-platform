@@ -62,10 +62,10 @@ resource "aws_subnet" "private_app" {
   availability_zone = var.azs[count.index]
 
   tags = merge(var.tags, {
-    Name                                    = "${var.name}-private-app-${var.azs[count.index]}"
-    "kubernetes.io/role/internal-elb"       = "1"
-    "kubernetes.io/cluster/${var.name}"     = "shared"
-    Tier                                    = "private-app"
+    Name                                = "${var.name}-private-app-${var.azs[count.index]}"
+    "kubernetes.io/role/internal-elb"   = "1"
+    "kubernetes.io/cluster/${var.name}" = "shared"
+    Tier                                = "private-app"
   })
 }
 

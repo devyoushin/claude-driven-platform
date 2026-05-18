@@ -14,8 +14,8 @@ resource "aws_iam_policy" "cross_account_metrics" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = "sts:AssumeRole"
+        Effect   = "Allow"
+        Action   = "sts:AssumeRole"
         Resource = "arn:aws:iam::${var.service_account_id}:role/cdp-service-readonly-role"
       }
     ]

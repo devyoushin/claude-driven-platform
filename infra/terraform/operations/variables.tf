@@ -35,7 +35,7 @@ variable "eks_cluster_version" {
 variable "eks_node_instance_types" {
   description = "EC2 instance types for monitoring EKS nodes"
   type        = list(string)
-  default     = ["t3.large"]  # 모니터링은 메모리 사용량이 높아 large 사용
+  default     = ["t3.large"] # 모니터링은 메모리 사용량이 높아 large 사용
 }
 
 variable "eks_node_desired_size" {

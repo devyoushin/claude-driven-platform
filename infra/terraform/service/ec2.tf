@@ -34,12 +34,12 @@ resource "aws_launch_template" "app" {
   }
 
   monitoring {
-    enabled = true  # Detailed monitoring for CloudWatch
+    enabled = true # Detailed monitoring for CloudWatch
   }
 
   metadata_options {
     http_endpoint               = "enabled"
-    http_tokens                 = "required"  # IMDSv2 필수
+    http_tokens                 = "required" # IMDSv2 필수
     http_put_response_hop_limit = 1
   }
 

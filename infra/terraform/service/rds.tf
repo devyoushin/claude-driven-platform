@@ -18,15 +18,15 @@ resource "aws_db_subnet_group" "main" {
 resource "aws_db_instance" "main" {
   identifier = "${local.name}-postgres"
 
-  engine               = "postgres"
-  engine_version       = var.rds_engine_version
-  instance_class       = var.rds_instance_class
-  allocated_storage    = var.rds_allocated_storage
-  max_allocated_storage = var.rds_allocated_storage * 5  # Auto-scaling up to 5x
+  engine                = "postgres"
+  engine_version        = var.rds_engine_version
+  instance_class        = var.rds_instance_class
+  allocated_storage     = var.rds_allocated_storage
+  max_allocated_storage = var.rds_allocated_storage * 5 # Auto-scaling up to 5x
 
   db_name  = "cdpdb"
   username = "cdpadmin"
-  password = var.rds_password  # 실제 운영에서는 Secrets Manager 사용 권장
+  password = var.rds_password # 실제 운영에서는 Secrets Manager 사용 권장
 
   multi_az               = true
   db_subnet_group_name   = aws_db_subnet_group.main.name
@@ -39,18 +39,18 @@ resource "aws_db_instance" "main" {
 
   # Backup
   backup_retention_period = 7
-  backup_window           = "03:00-04:00"  # KST 12:00-13:00
+  backup_window           = "03:00-04:00" # KST 12:00-13:00
   maintenance_window      = "Mon:04:00-Mon:05:00"
 
   # Monitoring
-  monitoring_interval          = 60
-  monitoring_role_arn          = aws_iam_role.rds_monitoring.arn
-  performance_insights_enabled = true
+  monitoring_interval                   = 60
+  monitoring_role_arn                   = aws_iam_role.rds_monitoring.arn
+  performance_insights_enabled          = true
   performance_insights_retention_period = 7
 
   # Protection
-  deletion_protection = true
-  skip_final_snapshot = false
+  deletion_protection       = true
+  skip_final_snapshot       = false
   final_snapshot_identifier = "${local.name}-postgres-final"
 
   # Logging

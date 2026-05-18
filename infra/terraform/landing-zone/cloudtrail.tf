@@ -61,6 +61,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "cloudtrail" {
     id     = "archive-old-logs"
     status = "Enabled"
 
+    filter {}
+
     transition {
       days          = 90
       storage_class = "GLACIER"

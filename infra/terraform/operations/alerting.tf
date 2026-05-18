@@ -152,8 +152,8 @@ resource "aws_cloudwatch_dashboard" "main" {
         width  = 12
         height = 6
         properties = {
-          title   = "EKS Cluster CPU (Service Account)"
-          region  = var.region
+          title  = "EKS Cluster CPU (Service Account)"
+          region = var.region
           metrics = [
             ["AWS/EKS", "cluster_failed_node_count", "ClusterName", "cdp-service-eks"]
           ]
@@ -167,8 +167,8 @@ resource "aws_cloudwatch_dashboard" "main" {
         width  = 12
         height = 6
         properties = {
-          title   = "RDS Connections (Service Account)"
-          region  = var.region
+          title  = "RDS Connections (Service Account)"
+          region = var.region
           metrics = [
             ["AWS/RDS", "DatabaseConnections", "DBInstanceIdentifier", "cdp-service-postgres"]
           ]
@@ -182,8 +182,8 @@ resource "aws_cloudwatch_dashboard" "main" {
         width  = 12
         height = 6
         properties = {
-          title   = "RDS CPU Utilization"
-          region  = var.region
+          title  = "RDS CPU Utilization"
+          region = var.region
           metrics = [
             ["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "cdp-service-postgres"]
           ]
@@ -197,8 +197,8 @@ resource "aws_cloudwatch_dashboard" "main" {
         width  = 12
         height = 6
         properties = {
-          title   = "ALB Request Count (Landing Zone)"
-          region  = var.region
+          title  = "ALB Request Count (Landing Zone)"
+          region = var.region
           metrics = [
             ["AWS/ApplicationELB", "RequestCount", "LoadBalancer", "cdp-landing-alb"]
           ]

@@ -28,7 +28,7 @@ module "vpc" {
 
   public_subnets      = ["10.20.1.0/24", "10.20.2.0/24"]
   private_app_subnets = ["10.20.11.0/24", "10.20.12.0/24"]
-  private_db_subnets  = []  # Operations에는 DB 불필요
+  private_db_subnets  = [] # Operations에는 DB 불필요
 
   tags = module.tags.tags
 }
@@ -51,6 +51,6 @@ resource "aws_ec2_transit_gateway_vpc_attachment" "operations" {
 resource "aws_route" "to_service" {
   count                  = length(local.azs)
   route_table_id         = module.vpc.private_app_subnet_ids[count.index]
-  destination_cidr_block = "10.10.0.0/16"  # Service VPC CIDR
+  destination_cidr_block = "10.10.0.0/16" # Service VPC CIDR
   transit_gateway_id     = var.transit_gateway_id
 }
