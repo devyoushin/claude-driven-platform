@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
+from sqlalchemy import text
 
 from app.api.routes import router
 from app.services.alert_evaluator import AlertEvaluator
@@ -60,7 +61,7 @@ async def health():
 async def ready():
     try:
         async with engine.connect() as conn:
-            await conn.execute("SELECT 1")
+            await conn.execute(text("SELECT 1"))
         return {"status": "ready"}
     except Exception as e:
         return {"status": "not ready", "error": str(e)}, 503

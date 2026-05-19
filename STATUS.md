@@ -18,14 +18,14 @@
 | 8 | 샘플 애플리케이션 | crypto-price-api (Go) + crypto-alert-service (Python), Dockerfile, Helm chart, CI/CD | 2026-05-17 |
 | 9 | Terraform fmt/검증 | 전체 모듈 terraform fmt 적용, lifecycle filter 수정 | 2026-05-18 |
 | 10 | 보안 강화 | GuardDuty(Org), Security Hub(CIS+Best Practices), Config Rules(13개), SNS 알림 | 2026-05-18 |
+| 11 | 로컬 테스트 검증 | docker-compose 로컬 실행, API 테스트 전체 통과, Prometheus 메트릭 확인 | 2026-05-19 |
 
 ### 다음에 할 것 📋
 
 | 우선순위 | 항목 | 메모 |
 |----------|------|------|
 | 1 | AWS 연결 및 terraform apply 테스트 | AWS 계정 + CLI 설정 필요 |
-| 2 | Go/Python 앱 로컬 테스트 | docker-compose로 로컬 실행 확인 |
-| 3 | docs/history.md 업데이트 | Step 9~10 작업 내역 추가 |
+| 2 | docs/history.md 업데이트 | Step 9~11 작업 내역 추가 |
 
 ### 블로커 / 대기 중 ⏸️
 
