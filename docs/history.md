@@ -616,7 +616,110 @@ cdp-landing-config-compliance     → Config NON_COMPLIANT
 
 ---
 
+## Step 10: 로컬 테스트 검증 — docker-compose (2026-05-19)
+
+### 목적
+AWS 없이 로컬 환경에서 두 마이크로서비스가 정상 동작하는지 검증한다.
+Docker build → PostgreSQL 연동 → API 호출 → Prometheus 메트릭까지 전체 파이프라인 확인.
+
+### 실행한 명령어
+
+```bash
+# 1. Docker 이미지 빌드
+docker compose build
+
+# 2. 전체 스택 실행 (PostgreSQL → Go API → Python Alert Service)
+docker compose up -d
+
+# 3. 컨테이너 상태 확인
+docker compose ps
+# 결과: 3개 컨테이너 모두 Up 상태
+
+# 4. Health Check 테스트
+curl -s http://localhost:8080/health   # → {"status": "ok"}
+curl -s http://localhost:8080/ready    # → {"status": "ready"}
+curl -s http://localhost:8000/health   # → {"status": "ok"}
+
+# 5. 가격 수집 확인 (Binance 실시간 데이터)
+curl -s http://localhost:8080/api/v1/prices | python3 -m json.tool
+# 결과: BTC, ETH, SOL, XRP, ADA 5개 심볼 실시간 가격 수집 중
+
+# 6. 개별 심볼 조회
+curl -s http://localhost:8080/api/v1/prices/BTCUSDT | python3 -m json.tool
+
+# 7. Alert 생성 테스트
+curl -s -X POST http://localhost:8000/api/v1/alerts \
+  -H "Content-Type: application/json" \
+  -d '{
+    "symbol": "BTCUSDT",
+    "condition": "above",
+    "target_price": 100000,
+    "notification_channel": "slack",
+    "notification_target": "https://hooks.slack.com/test",
+    "repeat": true,
+    "cooldown_minutes": 30
+  }' | python3 -m json.tool
+# 결과: Alert ID 반환, status: active
+
+# 8. Alert 목록 조회
+curl -s http://localhost:8000/api/v1/alerts | python3 -m json.tool
+
+# 9. Prometheus 메트릭 확인
+curl -s http://localhost:9091/metrics | head -20
+# 결과: crypto_price_api_fetch_duration_seconds, crypto_price 등 커스텀 메트릭 정상 노출
+
+# 10. 정리
+docker compose down
+```
+
+### 테스트 결과
+
+| 테스트 항목 | 결과 |
+|------------|------|
+| Docker build (Go multi-stage) | Pass |
+| Docker build (Python multi-stage) | Pass |
+| PostgreSQL healthcheck 연동 | Pass |
+| Go API — `/health`, `/ready` | Pass |
+| Python API — `/health` | Pass |
+| Binance 실시간 가격 수집 (30초 간격) | Pass — BTC, ETH, SOL, XRP, ADA |
+| 개별 심볼 조회 (`/api/v1/prices/BTCUSDT`) | Pass |
+| Alert CRUD (`POST/GET /api/v1/alerts`) | Pass |
+| 서비스 간 통신 (Python → Go HTTP) | Pass |
+| Prometheus custom metrics (`:9091/metrics`) | Pass |
+
+### 버그 수정 (2건)
+
+1. **`app/main.py` readiness check**: `conn.execute("SELECT 1")` → `conn.execute(text("SELECT 1"))`
+   - SQLAlchemy 2.x에서는 raw SQL string 직접 전달이 deprecated됨. `text()` 래핑 필수.
+
+2. **`app/api/routes.py` 미사용 import**: `from pydantic import BaseModel, EmailStr` → `EmailStr` 제거
+   - 실제 코드에서 사용하지 않는 import. `pydantic[email]` 없이 설치 시 import 에러 가능.
+
+### docker-compose 구성 요약
+
+```yaml
+services:
+  postgres:        # PostgreSQL 16 + healthcheck
+  crypto-price-api:  # Go, depends_on: postgres(healthy)
+  crypto-alert-service:  # Python, depends_on: postgres(healthy) + price-api(started)
+
+# 포트 매핑
+# localhost:5432 → PostgreSQL
+# localhost:8080 → Go API
+# localhost:9091 → Go Prometheus metrics (컨테이너 내 9090)
+# localhost:8000 → Python API + /metrics
+```
+
+### 배운 점
+- docker-compose의 `depends_on.condition: service_healthy`로 PostgreSQL이 완전히 준비된 후 앱 시작
+- Go 앱은 `DATABASE_URL`에 `?sslmode=disable` 필요 (로컬 PostgreSQL은 SSL 미설정)
+- Python 앱은 asyncpg 드라이버라 DSN 형식이 다름 (`postgresql+asyncpg://`)
+- Binance API는 인증 없이 실시간 가격 조회 가능 (`/api/v3/ticker/24hr`)
+- SQLAlchemy 2.x에서 raw SQL은 반드시 `text()` 래핑 필요 (1.x에서는 string 직접 전달 가능했음)
+- Prometheus metrics 포트를 API 포트와 분리하면 metrics endpoint가 외부에 노출되지 않음
+
+---
+
 ## 다음 단계 (예정)
 - [ ] 실제 AWS 연결 및 terraform apply 테스트
-- [ ] docker-compose 로컬 빌드/실행 테스트
 - [ ] Terraform에서 monitoring/ 파일 참조하도록 연결
